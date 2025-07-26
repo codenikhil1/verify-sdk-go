@@ -6477,7 +6477,7 @@ func NewTransformSourceModelToTargetModelRequest(server string, params *Transfor
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/flows/v1.0/config/model/transform")
+	operationPath := fmt.Sprintf("/flows/v1.0/config/models/transform")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
