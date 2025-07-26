@@ -22,7 +22,6 @@ type TransformModelResponse = openapi.TransformSourceModelToTargetModelObject
 
 type ModelTransformRequest struct {
 	ModelFile    io.Reader `json:"-"`
-	SourceFormat string    `json:"sourceFormat" yaml:"sourceFormat"`
 	TargetFormat string    `json:"targetFormat" yaml:"targetFormat"`
 }
 
@@ -30,7 +29,7 @@ func NewModelTransformClient() *ModelTransformClient {
 	return &ModelTransformClient{}
 }
 
-func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.Reader, sourceFormat, targetFormat string) ([]byte, error) {
+func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.Reader, targetFormat string) ([]byte, error) {
 	vc := contextx.GetVerifyContext(ctx)
 	client := openapi.NewClientWithOptions(ctx, vc.Tenant, c.Client)
 	defaultErr := errorsx.G11NError("unable to transform model")
@@ -49,13 +48,6 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 	_, err = io.Copy(part, modelFile)
 	if err != nil {
 		vc.Logger.Errorf("Unable to copy model file; err=%v", err)
-		return nil, defaultErr
-	}
-
-	// Add sourceformat parameter
-	err = writer.WriteField("sourceformat", sourceFormat)
-	if err != nil {
-		vc.Logger.Errorf("Unable to write sourceformat field; err=%v", err)
 		return nil, defaultErr
 	}
 
@@ -107,16 +99,16 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 	return resp.Body, nil
 }
 
-func (c *ModelTransformClient) TransformModelFromFile(ctx context.Context, filePath, sourceFormat, targetFormat string) ([]byte, error) {
+func (c *ModelTransformClient) TransformModelFromFile(ctx context.Context, filePath, targetFormat string) ([]byte, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, errorsx.G11NError("unable to open model file; err=%v", err)
 	}
 	defer file.Close()
 
-	return c.TransformModel(ctx, file, sourceFormat, targetFormat)
+	return c.TransformModel(ctx, file, targetFormat)
 }
 
 func (c *ModelTransformClient) TransformModelFromRequest(ctx context.Context, req *ModelTransformRequest) ([]byte, error) {
-	return c.TransformModel(ctx, req.ModelFile, req.SourceFormat, req.TargetFormat)
+	return c.TransformModel(ctx, req.ModelFile, req.TargetFormat)
 }
