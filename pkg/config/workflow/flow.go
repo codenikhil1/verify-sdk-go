@@ -27,6 +27,7 @@ type ModelTransformRequest struct {
 	ModelFile    io.Reader `json:"-"`
 	TargetFormat string    `json:"targetFormat" yaml:"targetFormat"`
 	FileName     string    `json:"fileName" yaml:"fileName"`
+	ModelPath    string    `json:"modelfile" yaml:"modelfile"`
 }
 
 func NewModelTransformClient() *ModelTransformClient {
