@@ -3,6 +3,7 @@ package workflow
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -74,6 +75,27 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 	reqEditors := []openapi.RequestEditorFn{
 		func(ctx context.Context, req *http.Request) error {
 			req.Header.Set("Content-Type", writer.FormDataContentType())
+			fmt.Printf("=== ACTUAL HTTP REQUEST ===\n")
+			fmt.Printf("Method: %s\n", req.Method)
+			fmt.Printf("URL: %s\n", req.URL.String())
+			fmt.Printf("Headers:\n")
+			for key, values := range req.Header {
+				for _, value := range values {
+					fmt.Printf("  %s: %s\n", key, value)
+				}
+			}
+
+			// Log the request body (form data)
+			if req.Body != nil {
+				bodyBytes, err := io.ReadAll(req.Body)
+				if err == nil {
+					fmt.Printf("Body Length: %d bytes\n", len(bodyBytes))
+					fmt.Printf("Body (first 500 chars): %s\n", string(bodyBytes[:min(500, len(bodyBytes))]))
+					// Restore the body for the actual request
+					req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				}
+			}
+			fmt.Printf("=== END REQUEST ===\n")
 			return nil
 		},
 	}
