@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ibm-verify/verify-sdk-go/internal/openapi"
 	contextx "github.com/ibm-verify/verify-sdk-go/pkg/core/context"
@@ -43,7 +44,7 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 
 	fmt.Printf("=== FORM CREATION DEBUG ===\n")
 	fmt.Printf("Target format parameter: '%s'\n", targetFormat)
-
+	fmt.Printf("File Name parameter: '%s'\n", filename)
 	// FIRST: Add the model file
 	part, err := writer.CreateFormFile("model", filename)
 	if err != nil {
@@ -98,19 +99,72 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 	}
 
 	// ADD THE REQUEST EDITORS (this was missing)
+	// Add this verification logging in your reqEditors:
 	reqEditors := []openapi.RequestEditorFn{
 		func(ctx context.Context, req *http.Request) error {
+			// Set the multipart form data as the request body
+			req.Body = io.NopCloser(&buf)
+			req.ContentLength = int64(buf.Len())
 			req.Header.Set("Content-Type", writer.FormDataContentType())
 
 			fmt.Printf("=== ACTUAL HTTP REQUEST ===\n")
 			fmt.Printf("Method: %s\n", req.Method)
 			fmt.Printf("URL: %s\n", req.URL.String())
-			fmt.Printf("Headers:\n")
-			for key, values := range req.Header {
-				for _, value := range values {
-					fmt.Printf("  %s: %s\n", key, value)
+			fmt.Printf("Content-Length: %d\n", req.ContentLength)
+
+			// **VERIFY EXACT FIELD COUNT**
+			bodyContent := buf.String()
+
+			// Count Content-Disposition headers (each form field has one)
+			fieldCount := strings.Count(bodyContent, "Content-Disposition: form-data")
+			fmt.Printf("Total form fields: %d\n", fieldCount)
+
+			// Verify specific fields exist
+			hasModelField := strings.Contains(bodyContent, `name="model"`)
+			hasTargetFormatField := strings.Contains(bodyContent, `name="targetformat"`)
+
+			fmt.Printf("=== FIELD VERIFICATION ===\n")
+			fmt.Printf("Field count: %d (expected: 2)\n", fieldCount)
+			fmt.Printf("Has 'model' field: %t\n", hasModelField)
+			fmt.Printf("Has 'targetformat' field: %t\n", hasTargetFormatField)
+
+			if fieldCount != 2 {
+				fmt.Printf("❌ WRONG FIELD COUNT! Expected 2, got %d\n", fieldCount)
+			} else if hasModelField && hasTargetFormatField {
+				fmt.Printf("✅ Correct: Exactly 2 fields present\n")
+			} else {
+				fmt.Printf("❌ WRONG FIELDS! Missing expected fields\n")
+			}
+
+			// Extract and display field values
+			fmt.Printf("=== FORM FIELDS ===\n")
+
+			// Extract model filename
+			modelFileName := "NOT_FOUND"
+			if modelMatch := strings.Index(bodyContent, `name="model"`); modelMatch >= 0 {
+				remaining := bodyContent[modelMatch:]
+				if filenameStart := strings.Index(remaining, `filename="`); filenameStart >= 0 {
+					filenameStart += 10
+					if filenameEnd := strings.Index(remaining[filenameStart:], `"`); filenameEnd >= 0 {
+						modelFileName = remaining[filenameStart : filenameStart+filenameEnd]
+					}
 				}
 			}
+
+			// Extract targetformat value
+			targetFormatValue := "NOT_FOUND"
+			if targetMatch := strings.Index(bodyContent, `name="targetformat"`); targetMatch >= 0 {
+				remaining := bodyContent[targetMatch:]
+				if valueStart := strings.Index(remaining, "\r\n\r\n"); valueStart >= 0 {
+					valueStart += 4
+					if valueEnd := strings.Index(remaining[valueStart:], "\r\n"); valueEnd >= 0 {
+						targetFormatValue = remaining[valueStart : valueStart+valueEnd]
+					}
+				}
+			}
+
+			fmt.Printf("model: <%s>\n", modelFileName)
+			fmt.Printf("targetformat: %s\n", targetFormatValue)
 			fmt.Printf("=== END REQUEST ===\n")
 
 			return nil
