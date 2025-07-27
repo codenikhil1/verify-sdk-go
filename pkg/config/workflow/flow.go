@@ -8,7 +8,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"strings"
 
 	"github.com/ibm-verify/verify-sdk-go/internal/openapi"
 	contextx "github.com/ibm-verify/verify-sdk-go/pkg/core/context"
@@ -50,12 +49,26 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 		return nil, defaultErr
 	}
 
+	fmt.Printf("=== FILE CONTENT DEBUG ===\n")
+	// Read the file content to check what we're sending
+	if seeker, ok := modelFile.(io.Seeker); ok {
+		// If it's seekable, read a preview and reset
+		previewBytes := make([]byte, 200)
+		n, _ := modelFile.Read(previewBytes)
+		fmt.Printf("File preview (first %d bytes): %s\n", n, string(previewBytes[:n]))
+
+		// Reset to beginning
+		seeker.Seek(0, 0)
+	}
+
+	// ONLY COPY ONCE
 	bytesWritten, err := io.Copy(part, modelFile)
 	if err != nil {
 		vc.Logger.Errorf("Unable to copy model file; err=%v", err)
 		return nil, defaultErr
 	}
 	fmt.Printf("✓ Added model file: %d bytes\n", bytesWritten)
+	fmt.Printf("=== END FILE DEBUG ===\n")
 
 	// SECOND: Add the targetformat field
 	err = writer.WriteField("targetformat", targetFormat)
@@ -65,7 +78,7 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 	}
 	fmt.Printf("✓ Added targetformat field with value: '%s'\n", targetFormat)
 
-	// THIRD: Close the writer
+	// THIRD: Close the writer ONLY ONCE
 	fmt.Printf("=== FORM FIELDS SUMMARY ===\n")
 	fmt.Printf("1. model (file): %d bytes\n", bytesWritten)
 	fmt.Printf("2. targetformat: %s\n", targetFormat)
@@ -77,39 +90,12 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 		return nil, defaultErr
 	}
 
-	// Add the model file
-	part, err1 := writer.CreateFormFile("model", "model.file")
-	if err1 != nil {
-		vc.Logger.Errorf("Unable to create form file; err=%v", err)
-		return nil, defaultErr
-	}
-
-	_, err = io.Copy(part, modelFile)
-	if err != nil {
-		vc.Logger.Errorf("Unable to copy model file; err=%v", err)
-		return nil, defaultErr
-	}
-
-	// Add targetformat parameter
-	err = writer.WriteField("targetformat", targetFormat)
-	if err != nil {
-		vc.Logger.Errorf("Unable to write targetformat field; err=%v", err)
-		return nil, defaultErr
-	}
-
-	// Close the writer to finalize the multipart form
-	err = writer.Close()
-	if err != nil {
-		vc.Logger.Errorf("Unable to close multipart writer; err=%v", err)
-		return nil, defaultErr
-	}
-
 	// Set up parameters
 	params := &TransformModelParams{
 		Authorization: "Bearer " + vc.Token,
 	}
 
-	// Create request editors for content type
+	// ADD THE REQUEST EDITORS (this was missing)
 	reqEditors := []openapi.RequestEditorFn{
 		func(ctx context.Context, req *http.Request) error {
 			req.Header.Set("Content-Type", writer.FormDataContentType())
@@ -121,59 +107,6 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 			for key, values := range req.Header {
 				for _, value := range values {
 					fmt.Printf("  %s: %s\n", key, value)
-				}
-			}
-
-			// ADD THIS: Log the actual form data being sent
-			if req.Body != nil {
-				bodyBytes, err := io.ReadAll(req.Body)
-				if err == nil {
-					fmt.Printf("Body Length: %d bytes\n", len(bodyBytes))
-					bodyStr := string(bodyBytes)
-
-					// Parse and show form fields clearly
-					fmt.Printf("=== FORM DATA ANALYSIS ===\n")
-					if strings.Contains(bodyStr, "Content-Disposition: form-data; name=\"model\"") {
-						fmt.Printf("✓ Found 'model' field\n")
-					} else {
-						fmt.Printf("✗ Missing 'model' field\n")
-					}
-
-					if strings.Contains(bodyStr, "Content-Disposition: form-data; name=\"targetformat\"") {
-						fmt.Printf("✓ Found 'targetformat' field\n")
-						// Extract the value
-						if idx := strings.Index(bodyStr, "name=\"targetformat\""); idx != -1 {
-							substr := bodyStr[idx:]
-							if end := strings.Index(substr, "\r\n\r\n"); end != -1 {
-								if valueEnd := strings.Index(substr[end+4:], "\r\n"); valueEnd != -1 {
-									value := substr[end+4 : end+4+valueEnd]
-									fmt.Printf("  targetformat value: '%s'\n", value)
-								}
-							}
-						}
-					} else {
-						fmt.Printf("✗ Missing 'targetformat' field\n")
-					}
-
-					// Check for other possible field names
-					if strings.Contains(bodyStr, "name=\"targetFormat\"") {
-						fmt.Printf("! Found 'targetFormat' (camelCase) field instead\n")
-					}
-					if strings.Contains(bodyStr, "name=\"target-format\"") {
-						fmt.Printf("! Found 'target-format' (kebab-case) field instead\n")
-					}
-
-					// Show first 800 characters of the body for manual inspection
-					fmt.Printf("=== RAW FORM DATA (first 800 chars) ===\n")
-					if len(bodyStr) > 800 {
-						fmt.Printf("%s...[truncated]\n", bodyStr[:800])
-					} else {
-						fmt.Printf("%s\n", bodyStr)
-					}
-					fmt.Printf("=== END FORM DATA ===\n")
-
-					// Restore the body for the actual request
-					req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 				}
 			}
 			fmt.Printf("=== END REQUEST ===\n")
