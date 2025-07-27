@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/ibm-verify/verify-sdk-go/internal/openapi"
 	contextx "github.com/ibm-verify/verify-sdk-go/pkg/core/context"
@@ -24,13 +25,14 @@ type TransformModelResponse = openapi.TransformSourceModelToTargetModelObject
 type ModelTransformRequest struct {
 	ModelFile    io.Reader `json:"-"`
 	TargetFormat string    `json:"targetFormat" yaml:"targetFormat"`
+	FileName     string    `json:"fileName" yaml:"fileName"`
 }
 
 func NewModelTransformClient() *ModelTransformClient {
 	return &ModelTransformClient{}
 }
 
-func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.Reader, targetFormat string) ([]byte, error) {
+func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.Reader, targetFormat string, filename string) ([]byte, error) {
 	vc := contextx.GetVerifyContext(ctx)
 	client := openapi.NewClientWithOptions(ctx, vc.Tenant, c.Client)
 	defaultErr := errorsx.G11NError("unable to transform model")
@@ -43,7 +45,7 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 	fmt.Printf("Target format parameter: '%s'\n", targetFormat)
 
 	// FIRST: Add the model file
-	part, err := writer.CreateFormFile("model", "model.file")
+	part, err := writer.CreateFormFile("model", filename)
 	if err != nil {
 		vc.Logger.Errorf("Unable to create form file; err=%v", err)
 		return nil, defaultErr
@@ -143,9 +145,11 @@ func (c *ModelTransformClient) TransformModelFromFile(ctx context.Context, fileP
 	}
 	defer file.Close()
 
-	return c.TransformModel(ctx, file, targetFormat)
+	filename := filepath.Base(filePath)
+
+	return c.TransformModel(ctx, file, targetFormat, filename)
 }
 
 func (c *ModelTransformClient) TransformModelFromRequest(ctx context.Context, req *ModelTransformRequest) ([]byte, error) {
-	return c.TransformModel(ctx, req.ModelFile, req.TargetFormat)
+	return c.TransformModel(ctx, req.ModelFile, req.TargetFormat, req.FileName)
 }
