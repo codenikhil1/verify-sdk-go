@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/ibm-verify/verify-sdk-go/internal/openapi"
 	contextx "github.com/ibm-verify/verify-sdk-go/pkg/core/context"
@@ -39,9 +40,46 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	// Add the model file
+	fmt.Printf("=== FORM CREATION DEBUG ===\n")
+	fmt.Printf("Target format parameter: '%s'\n", targetFormat)
+
+	// FIRST: Add the model file
 	part, err := writer.CreateFormFile("model", "model.file")
 	if err != nil {
+		vc.Logger.Errorf("Unable to create form file; err=%v", err)
+		return nil, defaultErr
+	}
+
+	bytesWritten, err := io.Copy(part, modelFile)
+	if err != nil {
+		vc.Logger.Errorf("Unable to copy model file; err=%v", err)
+		return nil, defaultErr
+	}
+	fmt.Printf("✓ Added model file: %d bytes\n", bytesWritten)
+
+	// SECOND: Add the targetformat field
+	err = writer.WriteField("targetformat", targetFormat)
+	if err != nil {
+		vc.Logger.Errorf("Unable to write targetformat field; err=%v", err)
+		return nil, defaultErr
+	}
+	fmt.Printf("✓ Added targetformat field with value: '%s'\n", targetFormat)
+
+	// THIRD: Close the writer
+	fmt.Printf("=== FORM FIELDS SUMMARY ===\n")
+	fmt.Printf("1. model (file): %d bytes\n", bytesWritten)
+	fmt.Printf("2. targetformat: %s\n", targetFormat)
+	fmt.Printf("=== END SUMMARY ===\n")
+
+	err = writer.Close()
+	if err != nil {
+		vc.Logger.Errorf("Unable to close multipart writer; err=%v", err)
+		return nil, defaultErr
+	}
+
+	// Add the model file
+	part, err1 := writer.CreateFormFile("model", "model.file")
+	if err1 != nil {
 		vc.Logger.Errorf("Unable to create form file; err=%v", err)
 		return nil, defaultErr
 	}
@@ -75,6 +113,7 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 	reqEditors := []openapi.RequestEditorFn{
 		func(ctx context.Context, req *http.Request) error {
 			req.Header.Set("Content-Type", writer.FormDataContentType())
+
 			fmt.Printf("=== ACTUAL HTTP REQUEST ===\n")
 			fmt.Printf("Method: %s\n", req.Method)
 			fmt.Printf("URL: %s\n", req.URL.String())
@@ -85,17 +124,60 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 				}
 			}
 
-			// Log the request body (form data)
+			// ADD THIS: Log the actual form data being sent
 			if req.Body != nil {
 				bodyBytes, err := io.ReadAll(req.Body)
 				if err == nil {
 					fmt.Printf("Body Length: %d bytes\n", len(bodyBytes))
-					fmt.Printf("Body (first 500 chars): %s\n", string(bodyBytes[:min(500, len(bodyBytes))]))
+					bodyStr := string(bodyBytes)
+
+					// Parse and show form fields clearly
+					fmt.Printf("=== FORM DATA ANALYSIS ===\n")
+					if strings.Contains(bodyStr, "Content-Disposition: form-data; name=\"model\"") {
+						fmt.Printf("✓ Found 'model' field\n")
+					} else {
+						fmt.Printf("✗ Missing 'model' field\n")
+					}
+
+					if strings.Contains(bodyStr, "Content-Disposition: form-data; name=\"targetformat\"") {
+						fmt.Printf("✓ Found 'targetformat' field\n")
+						// Extract the value
+						if idx := strings.Index(bodyStr, "name=\"targetformat\""); idx != -1 {
+							substr := bodyStr[idx:]
+							if end := strings.Index(substr, "\r\n\r\n"); end != -1 {
+								if valueEnd := strings.Index(substr[end+4:], "\r\n"); valueEnd != -1 {
+									value := substr[end+4 : end+4+valueEnd]
+									fmt.Printf("  targetformat value: '%s'\n", value)
+								}
+							}
+						}
+					} else {
+						fmt.Printf("✗ Missing 'targetformat' field\n")
+					}
+
+					// Check for other possible field names
+					if strings.Contains(bodyStr, "name=\"targetFormat\"") {
+						fmt.Printf("! Found 'targetFormat' (camelCase) field instead\n")
+					}
+					if strings.Contains(bodyStr, "name=\"target-format\"") {
+						fmt.Printf("! Found 'target-format' (kebab-case) field instead\n")
+					}
+
+					// Show first 800 characters of the body for manual inspection
+					fmt.Printf("=== RAW FORM DATA (first 800 chars) ===\n")
+					if len(bodyStr) > 800 {
+						fmt.Printf("%s...[truncated]\n", bodyStr[:800])
+					} else {
+						fmt.Printf("%s\n", bodyStr)
+					}
+					fmt.Printf("=== END FORM DATA ===\n")
+
 					// Restore the body for the actual request
 					req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 				}
 			}
 			fmt.Printf("=== END REQUEST ===\n")
+
 			return nil
 		},
 	}
