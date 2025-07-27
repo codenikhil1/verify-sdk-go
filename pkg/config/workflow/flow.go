@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/ibm-verify/verify-sdk-go/internal/openapi"
 	contextx "github.com/ibm-verify/verify-sdk-go/pkg/core/context"
@@ -23,13 +24,14 @@ type TransformModelResponse = openapi.TransformSourceModelToTargetModelObject
 type ModelTransformRequest struct {
 	ModelFile    io.Reader `json:"-"`
 	TargetFormat string    `json:"targetFormat" yaml:"targetFormat"`
+	ModelPath    string    `json:"modelfile" yaml:"modelfile"`
 }
 
 func NewModelTransformClient() *ModelTransformClient {
 	return &ModelTransformClient{}
 }
 
-func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.Reader, targetFormat string) ([]byte, error) {
+func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.Reader, targetFormat string, filename string) ([]byte, error) {
 	vc := contextx.GetVerifyContext(ctx)
 	client := openapi.NewClientWithOptions(ctx, vc.Tenant, c.Client)
 	defaultErr := errorsx.G11NError("unable to transform model")
@@ -39,7 +41,7 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 	writer := multipart.NewWriter(&buf)
 
 	// Add the model file
-	part, err := writer.CreateFormFile("model", "model.file")
+	part, err := writer.CreateFormFile("model", filename)
 	if err != nil {
 		vc.Logger.Errorf("Unable to create form file; err=%v", err)
 		return nil, defaultErr
@@ -51,14 +53,13 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 		return nil, defaultErr
 	}
 
-	// Add targetformat parameter
+	// Add the targetformat field
 	err = writer.WriteField("targetformat", targetFormat)
 	if err != nil {
 		vc.Logger.Errorf("Unable to write targetformat field; err=%v", err)
 		return nil, defaultErr
 	}
 
-	// Close the writer to finalize the multipart form
 	err = writer.Close()
 	if err != nil {
 		vc.Logger.Errorf("Unable to close multipart writer; err=%v", err)
@@ -70,10 +71,13 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 		Authorization: "Bearer " + vc.Token,
 	}
 
-	// Create request editors for content type
 	reqEditors := []openapi.RequestEditorFn{
 		func(ctx context.Context, req *http.Request) error {
+			// Set the multipart form data as the request body
+			req.Body = io.NopCloser(&buf)
+			req.ContentLength = int64(buf.Len())
 			req.Header.Set("Content-Type", writer.FormDataContentType())
+
 			return nil
 		},
 	}
@@ -106,9 +110,7 @@ func (c *ModelTransformClient) TransformModelFromFile(ctx context.Context, fileP
 	}
 	defer file.Close()
 
-	return c.TransformModel(ctx, file, targetFormat)
-}
+	filename := filepath.Base(filePath)
 
-func (c *ModelTransformClient) TransformModelFromRequest(ctx context.Context, req *ModelTransformRequest) ([]byte, error) {
-	return c.TransformModel(ctx, req.ModelFile, req.TargetFormat)
+	return c.TransformModel(ctx, file, targetFormat, filename)
 }
