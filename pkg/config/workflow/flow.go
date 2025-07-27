@@ -91,12 +91,18 @@ func (c *ModelTransformClient) TransformModel(ctx context.Context, modelFile io.
 
 	// Check response status
 	if resp.StatusCode() != http.StatusOK {
-		if err := errorsx.HandleCommonErrors(ctx, resp.HTTPResponse, "unable to transform model"); err != nil {
-			vc.Logger.Errorf("unable to transform the model; err=%s", err.Error())
-			return nil, errorsx.G11NError("unable to transform the model; err=%s", err.Error())
+		handleErr := errorsx.HandleCommonErrors(ctx, resp.HTTPResponse, "unable to transform model")
+
+		// Always log raw status and body
+		vc.Logger.Errorf("unable to transform the model; code=%d, body=%s", resp.StatusCode(), string(resp.Body))
+
+		// If there's a detailed error, return it
+		if handleErr != nil {
+			vc.Logger.Errorf("detailed error: %s", handleErr.Error())
+			return nil, errorsx.G11NError("unable to transform the model; err=%s", handleErr.Error())
 		}
 
-		vc.Logger.Errorf("unable to transform the model; code=%d, body=%s", resp.StatusCode(), string(resp.Body))
+		// Otherwise return a generic one
 		return nil, errorsx.G11NError("unable to transform the model; code=%d, body=%s", resp.StatusCode(), string(resp.Body))
 	}
 
